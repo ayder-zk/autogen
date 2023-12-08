@@ -608,7 +608,7 @@ class ConversableAgent(Agent):
         else:
             self._oai_messages[agent].clear()
 
-    def generate_oai_reply(
+    async def generate_oai_reply(
         self,
         messages: Optional[List[Dict]] = None,
         sender: Optional[Agent] = None,
@@ -622,7 +622,7 @@ class ConversableAgent(Agent):
             messages = self._oai_messages[sender]
 
         # TODO: #1143 handle token limit exceeded error
-        response = client.create(
+        response = await client.create(
             context=messages[-1].pop("context", None), messages=self._oai_system_message + messages
         )
         return True, client.extract_text_or_function_call(response)[0]
