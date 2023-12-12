@@ -9,6 +9,7 @@ from autogen import OpenAIWrapper
 from autogen.code_utils import DEFAULT_MODEL, UNKNOWN, content_str, execute_code, extract_code, infer_lang
 
 from .agent import Agent
+from autogen.agentchat.callbacks import AgentCallbackHandler
 
 try:
     from termcolor import colored
@@ -54,6 +55,7 @@ class ConversableAgent(Agent):
         code_execution_config: Optional[Union[Dict, Literal[False]]] = None,
         llm_config: Optional[Union[Dict, Literal[False]]] = None,
         default_auto_reply: Optional[Union[str, Dict, None]] = "",
+        callback: Optional[AgentCallbackHandler] = None,
     ):
         """
         Args:
@@ -119,6 +121,7 @@ class ConversableAgent(Agent):
             {} if code_execution_config is None else code_execution_config
         )
         self.human_input_mode = human_input_mode
+        self.callback = callback
         self._max_consecutive_auto_reply = (
             max_consecutive_auto_reply if max_consecutive_auto_reply is not None else self.MAX_CONSECUTIVE_AUTO_REPLY
         )
@@ -134,6 +137,7 @@ class ConversableAgent(Agent):
         self.register_reply([Agent, None], ConversableAgent.generate_async_function_call_reply)
         self.register_reply([Agent, None], ConversableAgent.check_termination_and_human_reply)
         self.register_reply([Agent, None], ConversableAgent.a_check_termination_and_human_reply)
+
 
     def register_reply(
         self,
@@ -343,6 +347,14 @@ class ConversableAgent(Agent):
         """
         # When the agent composes and sends the message, the role of the message is "assistant"
         # unless it's "function".
+        if self.callback:
+            self.callback.on_send(
+                agent=self,
+                message=message,
+                recipient=recipient,
+                request_reply=request_reply,
+            )
+
         valid = self._append_oai_message(message, "assistant", recipient)
         if valid:
             recipient.receive(message, self, request_reply, silent)
@@ -392,6 +404,14 @@ class ConversableAgent(Agent):
         """
         # When the agent composes and sends the message, the role of the message is "assistant"
         # unless it's "function".
+        if self.callback:
+            await self.callback.on_a_send(
+                agent=self,
+                message=message,
+                recipient=recipient,
+                request_reply=request_reply,
+            )
+
         valid = self._append_oai_message(message, "assistant", recipient)
         if valid:
             await recipient.a_receive(message, self, request_reply, silent)
@@ -475,6 +495,13 @@ class ConversableAgent(Agent):
         Raises:
             ValueError: if the message can't be converted into a valid ChatCompletion message.
         """
+        if self.callback:
+            self.callback.on_receive(
+                agent=self,
+                message=message,
+                sender=sender
+            )
+
         self._process_received_message(message, sender, silent)
         if request_reply is False or request_reply is None and self.reply_at_receive[sender] is False:
             return
@@ -511,6 +538,13 @@ class ConversableAgent(Agent):
         Raises:
             ValueError: if the message can't be converted into a valid ChatCompletion message.
         """
+        if self.callback:
+            await self.callback.on_a_receive(
+                agent=self,
+                message=message,
+                sender=sender
+            )
+
         self._process_received_message(message, sender, silent)
         if request_reply is False or request_reply is None and self.reply_at_receive[sender] is False:
             return
@@ -623,7 +657,13 @@ class ConversableAgent(Agent):
 
         # TODO: #1143 handle token limit exceeded error
         response = await client.create(
-            context=messages[-1].pop("context", None), messages=self._oai_system_message + messages
+            context=messages[-1].pop("context", None),
+            messages=self._oai_system_message + messages,
+            agent_config={
+                'callback': self.callback,
+                'agent': self,
+                'sender': sender,
+            }
         )
         return True, client.extract_text_or_function_call(response)[0]
 
@@ -930,6 +970,14 @@ class ConversableAgent(Agent):
         if messages is None:
             messages = self._oai_messages[sender]
 
+        if self.callback:
+            self.callback.on_generate_reply(
+                agent=self,
+                messages=messages,
+                sender=sender,
+                exclude=exclude,
+            )
+
         for reply_func_tuple in self._reply_func_list:
             reply_func = reply_func_tuple["reply_func"]
             if exclude and reply_func in exclude:
@@ -980,6 +1028,14 @@ class ConversableAgent(Agent):
 
         if messages is None:
             messages = self._oai_messages[sender]
+
+        if self.callback:
+            await self.callback.on_a_generate_reply(
+                agent=self,
+                messages=messages,
+                sender=sender,
+                exclude=exclude,
+            )
 
         for reply_func_tuple in self._reply_func_list:
             reply_func = reply_func_tuple["reply_func"]

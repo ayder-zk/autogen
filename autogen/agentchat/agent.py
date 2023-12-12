@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 
 class Agent:
@@ -11,6 +11,8 @@ class Agent:
     def __init__(
         self,
         name: str,
+        # callback: Optional['AgentCallbackHandler'] = None,
+        callback: Any = None,
     ):
         """
         Args:

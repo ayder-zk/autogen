@@ -34,7 +34,14 @@ class OpenAIWrapper:
     """A wrapper class for openai client."""
 
     cache_path_root: str = ".cache"
-    extra_kwargs = {"cache_seed", "filter_func", "allow_format_str_template", "context", "api_version"}
+    extra_kwargs = {
+        "cache_seed",
+        "filter_func",
+        "allow_format_str_template",
+        "context",
+        "api_version",
+        "callback",
+    }
     openai_kwargs = set(inspect.getfullargspec(OpenAI.__init__).kwonlyargs)
     total_usage_summary: Dict = None
     actual_usage_summary: Dict = None
@@ -43,7 +50,7 @@ class OpenAIWrapper:
             self,
             *,
             config_list: List[Dict] = None,
-            streaming_callback=None,
+            # streaming_callback=None,
             **base_config
     ):
         """
@@ -90,7 +97,7 @@ class OpenAIWrapper:
         else:
             self._clients = [self._client(extra_kwargs, openai_config)]
             self._config_list = [extra_kwargs]
-        self.streaming_callback = streaming_callback
+        # self.streaming_callback = streaming_callback
 
     def _process_for_azure(self, config: Dict, extra_kwargs: Dict, segment: str = "default"):
         # deal with api_version
@@ -222,6 +229,9 @@ class OpenAIWrapper:
         if ERROR:
             raise ERROR
         last = len(self._clients) - 1
+
+        agent_config = config.pop('agent_config', {})
+
         for i, client in enumerate(self._clients):
             # merge the input config with the i-th config in the config list
             full_config = {**config, **self._config_list[i]}
@@ -232,7 +242,8 @@ class OpenAIWrapper:
             # construct the create params
             params = self._construct_create_params(create_config, extra_kwargs)
             # get the cache_seed, filter_func and context
-            cache_seed = extra_kwargs.get("cache_seed", 41)
+            # cache_seed = extra_kwargs.get("cache_seed", 41)
+            cache_seed = extra_kwargs.get("cache_seed")
             filter_func = extra_kwargs.get("filter_func")
             context = extra_kwargs.get("context")
 
@@ -260,13 +271,14 @@ class OpenAIWrapper:
                             return response
                         continue  # filter is not passed; try the next config
             try:
-                response = await self._completions_create(client, params)
+                response = await self._completions_create(
+                    client, params, agent_config=agent_config)
             except APIError as err:
                 error_code = getattr(err, "code", None)
                 if error_code == "content_filter":
                     # raise the error for content_filter
                     raise
-                logger.debug(f"config {i} failed", exc_info=1)
+                logger.debug(f"config {i} failed", exc_info=True)
                 if i == last:
                     raise
             else:
@@ -287,9 +299,19 @@ class OpenAIWrapper:
                     return response
                 continue  # filter is not passed; try the next config
 
-    async def _completions_create(self, client, params):
+    async def _completions_create(self, client, params, **kwargs):
+
+        async def try_on_llm_new_token_callback(token: str):
+            if agent_config and (callback := agent_config['callback']):
+                return await callback.on_llm_new_token(
+                    agent=agent_config['agent'],
+                    token=token,
+                    sender=agent_config['sender'])
+
         completions = client.chat.completions if "messages" in params \
             else client.completions
+
+        agent_config = kwargs.get('agent_config')
         # If streaming is enabled, has messages, and does not have functions,
         # then iterate over the chunks of the response
         if params.get("stream", False) \
@@ -311,13 +333,11 @@ class OpenAIWrapper:
                     for choice in chunk.choices:
                         content = choice.delta.content
                         finish_reasons[choice.index] = choice.finish_reason
-                        # If content is present, print it to the terminal
-                        # and update response variables
+                        # If content is present, print it to the terminal,
+                        # run the callback, and update response variables
                         if content is not None:
                             print(content, end="", flush=True)
-                            if self.streaming_callback is not None:
-                                await self.streaming_callback.on_llm_new_token(
-                                    content, chat_history={})
+                            await try_on_llm_new_token_callback(token=content)
                             response_contents[choice.index] += content
                             completion_tokens += 1
                         else:
