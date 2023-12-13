@@ -659,11 +659,8 @@ class ConversableAgent(Agent):
         response = await client.create(
             context=messages[-1].pop("context", None),
             messages=self._oai_system_message + messages,
-            agent_config={
-                'callback': self.callback,
-                'agent': self,
-                'sender': sender,
-            }
+            callback_config=dict(callback=self.callback,
+                                 params={'agent': self, 'sender': sender})
         )
         return True, client.extract_text_or_function_call(response)[0]
 

@@ -40,17 +40,15 @@ class OpenAIWrapper:
         "allow_format_str_template",
         "context",
         "api_version",
-        "callback",
     }
     openai_kwargs = set(inspect.getfullargspec(OpenAI.__init__).kwonlyargs)
-    total_usage_summary: Dict = None
-    actual_usage_summary: Dict = None
+    total_usage_summary: Optional[Dict] = None
+    actual_usage_summary: Optional[Dict] = None
 
     def __init__(
             self,
             *,
             config_list: List[Dict] = None,
-            # streaming_callback=None,
             **base_config
     ):
         """
@@ -86,20 +84,30 @@ class OpenAIWrapper:
         """
         openai_config, extra_kwargs = self._separate_openai_config(base_config)
         if type(config_list) is list and len(config_list) == 0:
-            logger.warning("openai client was provided with an empty config_list, which may not be intended.")
+            logger.warning("openai client was provided with an empty "
+                           "config_list, which may not be intended.")
         if config_list:
-            config_list = [config.copy() for config in config_list]  # make a copy before modifying
-            self._clients = [self._client(config, openai_config) for config in config_list]  # could modify the config
+            config_list = [config.copy() for config in config_list]  # make
+            # a copy before modifying
+            self._clients = [
+                self._client(config, openai_config)
+                for config in config_list
+            ]  # could modify the config
             self._config_list = [
-                {**extra_kwargs, **{k: v for k, v in config.items() if k not in self.openai_kwargs}}
+                {**extra_kwargs, **{k: v for k, v in config.items()
+                                    if k not in self.openai_kwargs}}
                 for config in config_list
             ]
         else:
             self._clients = [self._client(extra_kwargs, openai_config)]
             self._config_list = [extra_kwargs]
-        # self.streaming_callback = streaming_callback
 
-    def _process_for_azure(self, config: Dict, extra_kwargs: Dict, segment: str = "default"):
+    def _process_for_azure(
+            self,
+            config: Dict,
+            extra_kwargs: Dict,
+            segment: str = "default"
+    ):
         # deal with api_version
         query_segment = f"{segment}_query"
         headers_segment = f"{segment}_headers"
@@ -113,8 +121,10 @@ class OpenAIWrapper:
             return
         # deal with api_type
         api_type = extra_kwargs.get("api_type")
-        if api_type is not None and api_type.startswith("azure") and headers_segment not in config:
-            api_key = config.get("api_key", os.environ.get("AZURE_OPENAI_API_KEY"))
+        if api_type is not None and api_type.startswith("azure") \
+                and headers_segment not in config:
+            api_key = config.get("api_key",
+                                 os.environ.get("AZURE_OPENAI_API_KEY"))
             config[headers_segment] = {"api-key": api_key}
             # remove the api_type from extra_kwargs
             extra_kwargs.pop("api_type")
@@ -124,13 +134,16 @@ class OpenAIWrapper:
                 return
             if "gpt-3.5" in model:
                 # hack for azure gpt-3.5
-                extra_kwargs["model"] = model = model.replace("gpt-3.5", "gpt-35")
+                extra_kwargs["model"] = model = model.replace("gpt-3.5",
+                                                              "gpt-35")
             base_url = config.get("base_url")
             if base_url is None:
-                raise ValueError("to use azure openai api, base_url must be specified.")
+                raise ValueError("to use azure openai api, "
+                                 "base_url must be specified.")
             suffix = f"/openai/deployments/{model}"
             if not base_url.endswith(suffix):
-                config["base_url"] += suffix[1:] if base_url.endswith("/") else suffix
+                config["base_url"] += suffix[1:] if base_url.endswith("/") \
+                    else suffix
 
     def _separate_openai_config(self, config):
         """Separate the config into openai_config and extra_kwargs."""
@@ -230,7 +243,7 @@ class OpenAIWrapper:
             raise ERROR
         last = len(self._clients) - 1
 
-        agent_config = config.pop('agent_config', {})
+        callback_config = config.pop('callback_config', {})
 
         for i, client in enumerate(self._clients):
             # merge the input config with the i-th config in the config list
@@ -272,7 +285,7 @@ class OpenAIWrapper:
                         continue  # filter is not passed; try the next config
             try:
                 response = await self._completions_create(
-                    client, params, agent_config=agent_config)
+                    client, params, callback_config=callback_config)
             except APIError as err:
                 error_code = getattr(err, "code", None)
                 if error_code == "content_filter":
@@ -299,19 +312,17 @@ class OpenAIWrapper:
                     return response
                 continue  # filter is not passed; try the next config
 
+    @staticmethod
+    def extract_callback(callback_config):
+        if callback_config:
+            return callback_config['callback'], callback_config['params']
+        else:
+            return None, None
+
     async def _completions_create(self, client, params, **kwargs):
-
-        async def try_on_llm_new_token_callback(token: str):
-            if agent_config and (callback := agent_config['callback']):
-                return await callback.on_llm_new_token(
-                    agent=agent_config['agent'],
-                    token=token,
-                    sender=agent_config['sender'])
-
         completions = client.chat.completions if "messages" in params \
             else client.completions
 
-        agent_config = kwargs.get('agent_config')
         # If streaming is enabled, has messages, and does not have functions,
         # then iterate over the chunks of the response
         if params.get("stream", False) \
@@ -324,24 +335,43 @@ class OpenAIWrapper:
             # Set the terminal text color to green
             print("\033[32m", end="")
 
+            # Check for callback
+            callback, callback_params = self.extract_callback(
+                kwargs.get('callback_config'))
+
             # Send the chat completion request to OpenAI's API
             # and process the response in chunks
+            if callback:
+                await callback.on_llm_start(**callback_params)
+
             last_chunk = None
-            for chunk in completions.create(**params):
-                if chunk.choices:
-                    last_chunk = chunk
-                    for choice in chunk.choices:
-                        content = choice.delta.content
-                        finish_reasons[choice.index] = choice.finish_reason
-                        # If content is present, print it to the terminal,
-                        # run the callback, and update response variables
-                        if content is not None:
-                            print(content, end="", flush=True)
-                            await try_on_llm_new_token_callback(token=content)
-                            response_contents[choice.index] += content
-                            completion_tokens += 1
-                        else:
-                            print()
+            try:
+                for chunk in completions.create(**params):
+                    if chunk.choices:
+                        last_chunk = chunk
+                        for choice in chunk.choices:
+                            content = choice.delta.content
+                            finish_reasons[choice.index] = choice.finish_reason
+                            # If content is present, print it to the terminal,
+                            # run the callback, and update response variables
+
+                            if callback:
+                                await callback.on_llm_new_token(
+                                    token=content, **callback_params)
+
+                            if content is not None:
+                                print(content, end="", flush=True)
+                                response_contents[choice.index] += content
+                                completion_tokens += 1
+                            else:
+                                print()
+            except Exception as e:
+                if callback:
+                    await callback.on_llm_error(**callback_params, error=e)
+                raise e
+            finally:
+                if callback:
+                    await callback.on_llm_end(**callback_params)
 
             # Reset the terminal text color
             print("\033[0m\n")
@@ -389,7 +419,11 @@ class OpenAIWrapper:
 
         return response
 
-    def _update_usage_summary(self, response: ChatCompletion | Completion, use_cache: bool) -> None:
+    def _update_usage_summary(
+            self,
+            response: ChatCompletion | Completion,
+            use_cache: bool
+    ) -> None:
         """Update the usage summary.
 
         Usage is calculated no mattter filter is passed or not.
@@ -402,12 +436,16 @@ class OpenAIWrapper:
                 usage_summary["total_cost"] += response.cost
 
             usage_summary[response.model] = {
-                "cost": usage_summary.get(response.model, {}).get("cost", 0) + response.cost,
-                "prompt_tokens": usage_summary.get(response.model, {}).get("prompt_tokens", 0)
+                "cost": usage_summary.get(response.model, {}).get("cost", 0)
+                + response.cost,
+                "prompt_tokens": usage_summary.get(
+                    response.model, {}).get("prompt_tokens", 0)
                 + response.usage.prompt_tokens,
-                "completion_tokens": usage_summary.get(response.model, {}).get("completion_tokens", 0)
+                "completion_tokens": usage_summary.get(
+                    response.model, {}).get("completion_tokens", 0)
                 + response.usage.completion_tokens,
-                "total_tokens": usage_summary.get(response.model, {}).get("total_tokens", 0)
+                "total_tokens": usage_summary.get(
+                    response.model, {}).get("total_tokens", 0)
                 + response.usage.total_tokens,
             }
             return usage_summary
@@ -416,22 +454,32 @@ class OpenAIWrapper:
         if not use_cache:
             self.actual_usage_summary = update_usage(self.actual_usage_summary)
 
-    def print_usage_summary(self, mode: Union[str, List[str]] = ["actual", "total"]) -> None:
+    def print_usage_summary(
+            self,
+            mode: Union[str, List[str]] = ["actual", "total"]
+    ) -> None:
         """Print the usage summary."""
 
         def print_usage(usage_summary, usage_type="total"):
-            word_from_type = "including" if usage_type == "total" else "excluding"
+            word_from_type = "including" if usage_type == "total" \
+                else "excluding"
             if usage_summary is None:
-                print("No actual cost incurred (all completions are using cache).", flush=True)
+                print("No actual cost incurred (all completions are using "
+                      "cache).",
+                      flush=True)
                 return
 
             print(f"Usage summary {word_from_type} cached usage: ", flush=True)
-            print(f"Total cost: {round(usage_summary['total_cost'], 5)}", flush=True)
+            print(f"Total cost: {round(usage_summary['total_cost'], 5)}",
+                  flush=True)
             for model, counts in usage_summary.items():
                 if model == "total_cost":
                     continue  #
                 print(
-                    f"* Model '{model}': cost: {round(counts['cost'], 5)}, prompt_tokens: {counts['prompt_tokens']}, completion_tokens: {counts['completion_tokens']}, total_tokens: {counts['total_tokens']}",
+                    f"* Model '{model}': cost: {round(counts['cost'], 5)}, "
+                    f"prompt_tokens: {counts['prompt_tokens']}, "
+                    f"completion_tokens: {counts['completion_tokens']}, "
+                    f"total_tokens: {counts['total_tokens']}",
                     flush=True,
                 )
 
@@ -441,7 +489,10 @@ class OpenAIWrapper:
 
         if isinstance(mode, list):
             if len(mode) == 0 or len(mode) > 2:
-                raise ValueError(f'Invalid mode: {mode}, choose from "actual", "total", ["actual", "total"]')
+                raise ValueError(f'Invalid mode: {mode}, '
+                                 f'choose from "actual", '
+                                 f'"total", '
+                                 f'["actual", "total"]')
             if "actual" in mode and "total" in mode:
                 mode = "both"
             elif "actual" in mode:
@@ -457,7 +508,8 @@ class OpenAIWrapper:
                 print_usage(self.total_usage_summary, "total")
             else:
                 print(
-                    "All completions are non-cached: the total cost with cached completions is the same as actual cost.",
+                    "All completions are non-cached: the total cost with "
+                    "cached completions is the same as actual cost.",
                     flush=True,
                 )
         elif mode == "total":
@@ -465,7 +517,10 @@ class OpenAIWrapper:
         elif mode == "actual":
             print_usage(self.actual_usage_summary, "actual")
         else:
-            raise ValueError(f'Invalid mode: {mode}, choose from "actual", "total", ["actual", "total"]')
+            raise ValueError(f'Invalid mode: {mode}, '
+                             f'choose from "actual", '
+                             f'"total", '
+                             f'["actual", "total"]')
         print("-" * 100, flush=True)
 
     def clear_usage_summary(self) -> None:
