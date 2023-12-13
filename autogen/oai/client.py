@@ -345,6 +345,7 @@ class OpenAIWrapper:
                 await callback.on_llm_start(**callback_params)
 
             last_chunk = None
+            token_usage = None
             try:
                 for chunk in completions.create(**params):
                     if chunk.choices:
@@ -365,50 +366,53 @@ class OpenAIWrapper:
                                 completion_tokens += 1
                             else:
                                 print()
+
+                # Reset the terminal text color
+                print("\033[0m\n")
+
+                # Prepare the final ChatCompletion object based on the
+                # accumulated data
+                if last_chunk:
+                    chunk = last_chunk
+                    model = chunk.model.replace("gpt-35", "gpt-3.5")  # hack
+                    # for Azure API
+                    prompt_tokens = count_token(params["messages"], model)
+                    response = ChatCompletion(
+                        id=chunk.id,
+                        model=chunk.model,
+                        created=chunk.created,
+                        object="chat.completion",
+                        choices=[],
+                        usage=CompletionUsage(
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            total_tokens=prompt_tokens + completion_tokens,
+                        ),
+                    )
+                    token_usage = response.usage
+                    for i in range(len(response_contents)):
+                        response.choices.append(
+                            Choice(
+                                index=i,
+                                finish_reason=finish_reasons[i],
+                                message=ChatCompletionMessage(
+                                    role="assistant",
+                                    content=response_contents[i],
+                                    function_call=None
+                                ),
+                            )
+                        )
+                else:
+                    response = None
+
             except Exception as e:
                 if callback:
                     await callback.on_llm_error(**callback_params, error=e)
                 raise e
             finally:
                 if callback:
-                    await callback.on_llm_end(**callback_params)
-
-            # Reset the terminal text color
-            print("\033[0m\n")
-
-            # Prepare the final ChatCompletion object based on the
-            # accumulated data
-            if last_chunk:
-                chunk = last_chunk
-                model = chunk.model.replace("gpt-35", "gpt-3.5")  # hack for
-                # Azure API
-                prompt_tokens = count_token(params["messages"], model)
-                response = ChatCompletion(
-                    id=chunk.id,
-                    model=chunk.model,
-                    created=chunk.created,
-                    object="chat.completion",
-                    choices=[],
-                    usage=CompletionUsage(
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=completion_tokens,
-                        total_tokens=prompt_tokens + completion_tokens,
-                    ),
-                )
-                for i in range(len(response_contents)):
-                    response.choices.append(
-                        Choice(
-                            index=i,
-                            finish_reason=finish_reasons[i],
-                            message=ChatCompletionMessage(
-                                role="assistant",
-                                content=response_contents[i],
-                                function_call=None
-                            ),
-                        )
-                    )
-            else:
-                response = None
+                    await callback.on_llm_end(**callback_params,
+                                              token_usage=token_usage)
         else:
             # If streaming is not enabled or using functions, send a regular
             # chat completion request
