@@ -64,6 +64,26 @@ class AgentCallbackHandler:
     ) -> Any:
         """(async) Run on the agent generates a reply."""
 
+    def on_generate_final_reply(
+            self,
+            agent: Agent,
+            reply: Union[str, Dict, None],
+            messages: Optional[List[Dict]] = None,
+            sender: Optional[Agent] = None,
+            **kwargs: Any
+    ) -> Any:
+        """Run on the agent generate a final reply."""
+
+    async def on_a_generate_final_reply(
+            self,
+            agent: Agent,
+            reply: Union[str, Dict, None],
+            messages: Optional[List[Dict]] = None,
+            sender: Optional[Agent] = None,
+            **kwargs: Any
+    ) -> Any:
+        """(async) Run on the agent generates a final reply."""
+
     async def on_llm_start(
             self,
             agent: Agent,

@@ -40,7 +40,8 @@ class ConversableAgent(Agent):
     DEFAULT_CONFIG = {
         "model": DEFAULT_MODEL,
     }
-    MAX_CONSECUTIVE_AUTO_REPLY = 100  # maximum number of consecutive auto replies (subject to future change)
+    MAX_CONSECUTIVE_AUTO_REPLY = 100  # maximum number of consecutive auto
+    # replies (subject to future change)
 
     llm_config: Union[Dict, Literal[False]]
 
@@ -137,7 +138,6 @@ class ConversableAgent(Agent):
         self.register_reply([Agent, None], ConversableAgent.generate_async_function_call_reply)
         self.register_reply([Agent, None], ConversableAgent.check_termination_and_human_reply)
         self.register_reply([Agent, None], ConversableAgent.a_check_termination_and_human_reply)
-
 
     def register_reply(
         self,
@@ -972,7 +972,6 @@ class ConversableAgent(Agent):
                 agent=self,
                 messages=messages,
                 sender=sender,
-                exclude=exclude,
             )
 
         for reply_func_tuple in self._reply_func_list:
@@ -984,6 +983,13 @@ class ConversableAgent(Agent):
             if self._match_trigger(reply_func_tuple["trigger"], sender):
                 final, reply = reply_func(self, messages=messages, sender=sender, config=reply_func_tuple["config"])
                 if final:
+                    if self.callback:
+                        self.callback.on_generate_final_reply(
+                            agent=self,
+                            reply=reply,
+                            sender=sender,
+                            messages=messages,
+                        )
                     return reply
         return self._default_auto_reply
 
@@ -1031,7 +1037,6 @@ class ConversableAgent(Agent):
                 agent=self,
                 messages=messages,
                 sender=sender,
-                exclude=exclude,
             )
 
         for reply_func_tuple in self._reply_func_list:
@@ -1046,6 +1051,13 @@ class ConversableAgent(Agent):
                 else:
                     final, reply = reply_func(self, messages=messages, sender=sender, config=reply_func_tuple["config"])
                 if final:
+                    if self.callback:
+                        await self.callback.on_a_generate_final_reply(
+                            agent=self,
+                            reply=reply,
+                            sender=sender,
+                            messages=messages,
+                        )
                     return reply
         return self._default_auto_reply
 
