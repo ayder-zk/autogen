@@ -9,7 +9,8 @@ from autogen import OpenAIWrapper
 from autogen.code_utils import DEFAULT_MODEL, UNKNOWN, content_str, execute_code, extract_code, infer_lang
 
 from .agent import Agent
-from autogen.agentchat.callbacks import AgentCallbackHandler
+from autogen.agentchat.callbacks import AgentCallbackHandler, \
+    AgentCallbackListHandler
 
 try:
     from termcolor import colored
@@ -56,7 +57,9 @@ class ConversableAgent(Agent):
         code_execution_config: Optional[Union[Dict, Literal[False]]] = None,
         llm_config: Optional[Union[Dict, Literal[False]]] = None,
         default_auto_reply: Optional[Union[str, Dict, None]] = "",
-        callback: Optional[AgentCallbackHandler] = None,
+        callbacks: Optional[
+            Union[AgentCallbackListHandler, List[AgentCallbackHandler]]
+        ] = None,
     ):
         """
         Args:
@@ -122,9 +125,11 @@ class ConversableAgent(Agent):
             {} if code_execution_config is None else code_execution_config
         )
         self.human_input_mode = human_input_mode
-        self.callback = callback
+        self.callbacks = callbacks
         self._max_consecutive_auto_reply = (
-            max_consecutive_auto_reply if max_consecutive_auto_reply is not None else self.MAX_CONSECUTIVE_AUTO_REPLY
+            max_consecutive_auto_reply
+            if max_consecutive_auto_reply is not None
+            else self.MAX_CONSECUTIVE_AUTO_REPLY
         )
         self._consecutive_auto_reply_counter = defaultdict(int)
         self._max_consecutive_auto_reply_dict = defaultdict(self.max_consecutive_auto_reply)
@@ -192,6 +197,19 @@ class ConversableAgent(Agent):
                 "reset_config": reset_config,
             },
         )
+
+    @property
+    def callbacks(self):
+        return self._callbacks
+
+    @callbacks.setter
+    def callbacks(self, value):
+        if isinstance(value, AgentCallbackListHandler):
+            self._callbacks = value
+        elif value is not None:
+            self._callbacks = AgentCallbackListHandler(callbacks=value)
+        else:
+            self._callbacks = None
 
     @property
     def system_message(self) -> Union[str, List]:
@@ -347,8 +365,8 @@ class ConversableAgent(Agent):
         """
         # When the agent composes and sends the message, the role of the message is "assistant"
         # unless it's "function".
-        if self.callback:
-            self.callback.on_send(
+        if self.callbacks:
+            self.callbacks.on_send(
                 agent=self,
                 message=message,
                 recipient=recipient,
@@ -404,8 +422,8 @@ class ConversableAgent(Agent):
         """
         # When the agent composes and sends the message, the role of the message is "assistant"
         # unless it's "function".
-        if self.callback:
-            await self.callback.on_a_send(
+        if self.callbacks:
+            await self.callbacks.on_a_send(
                 agent=self,
                 message=message,
                 recipient=recipient,
@@ -495,8 +513,8 @@ class ConversableAgent(Agent):
         Raises:
             ValueError: if the message can't be converted into a valid ChatCompletion message.
         """
-        if self.callback:
-            self.callback.on_receive(
+        if self.callbacks:
+            self.callbacks.on_receive(
                 agent=self,
                 message=message,
                 sender=sender
@@ -538,8 +556,8 @@ class ConversableAgent(Agent):
         Raises:
             ValueError: if the message can't be converted into a valid ChatCompletion message.
         """
-        if self.callback:
-            await self.callback.on_a_receive(
+        if self.callbacks:
+            await self.callbacks.on_a_receive(
                 agent=self,
                 message=message,
                 sender=sender
@@ -659,7 +677,7 @@ class ConversableAgent(Agent):
         response = await client.create(
             context=messages[-1].pop("context", None),
             messages=self._oai_system_message + messages,
-            callback_config=dict(callback=self.callback,
+            callback_config=dict(callback=self.callbacks,
                                  params={'agent': self, 'sender': sender})
         )
         return True, client.extract_text_or_function_call(response)[0]
@@ -967,8 +985,8 @@ class ConversableAgent(Agent):
         if messages is None:
             messages = self._oai_messages[sender]
 
-        if self.callback:
-            self.callback.on_generate_reply(
+        if self.callbacks:
+            self.callbacks.on_generate_reply(
                 agent=self,
                 messages=messages,
                 sender=sender,
@@ -983,8 +1001,8 @@ class ConversableAgent(Agent):
             if self._match_trigger(reply_func_tuple["trigger"], sender):
                 final, reply = reply_func(self, messages=messages, sender=sender, config=reply_func_tuple["config"])
                 if final:
-                    if self.callback:
-                        self.callback.on_generate_final_reply(
+                    if self.callbacks:
+                        self.callbacks.on_generate_final_reply(
                             agent=self,
                             reply=reply,
                             sender=sender,
@@ -1032,8 +1050,8 @@ class ConversableAgent(Agent):
         if messages is None:
             messages = self._oai_messages[sender]
 
-        if self.callback:
-            await self.callback.on_a_generate_reply(
+        if self.callbacks:
+            await self.callbacks.on_a_generate_reply(
                 agent=self,
                 messages=messages,
                 sender=sender,
@@ -1051,8 +1069,8 @@ class ConversableAgent(Agent):
                 else:
                     final, reply = reply_func(self, messages=messages, sender=sender, config=reply_func_tuple["config"])
                 if final:
-                    if self.callback:
-                        await self.callback.on_a_generate_final_reply(
+                    if self.callbacks:
+                        await self.callbacks.on_a_generate_final_reply(
                             agent=self,
                             reply=reply,
                             sender=sender,
