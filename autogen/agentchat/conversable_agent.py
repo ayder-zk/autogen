@@ -22,6 +22,9 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+AgentCallbackHandlerType = Union[
+    AgentCallbackListHandler, List[AgentCallbackHandler]]
+
 
 class ConversableAgent(Agent):
     """(In preview) A class for generic conversable agents which can be configured as assistant or user proxy.
@@ -57,9 +60,7 @@ class ConversableAgent(Agent):
         code_execution_config: Optional[Union[Dict, Literal[False]]] = None,
         llm_config: Optional[Union[Dict, Literal[False]]] = None,
         default_auto_reply: Optional[Union[str, Dict, None]] = "",
-        callbacks: Optional[
-            Union[AgentCallbackListHandler, List[AgentCallbackHandler]]
-        ] = None,
+        callbacks: Optional[AgentCallbackHandlerType] = None
     ):
         """
         Args:
@@ -206,7 +207,9 @@ class ConversableAgent(Agent):
     def callbacks(self, value):
         if isinstance(value, AgentCallbackListHandler):
             self._callbacks = value
-        elif value is not None:
+        elif isinstance(value, AgentCallbackHandler):
+            self._callbacks = AgentCallbackListHandler(callbacks=[value])
+        elif isinstance(value, list):
             self._callbacks = AgentCallbackListHandler(callbacks=value)
         else:
             self._callbacks = None
