@@ -282,6 +282,13 @@ class ConversableAgent(Agent):
         """Return the system message."""
         return self._oai_system_message[0]["content"]
 
+    @property
+    def oai_system_message(self) -> list[dict[str, str]]:
+        return self._update_oai_system_message()
+
+    def _update_oai_system_message(self) -> list[dict[str, str]]:
+        return self._oai_system_message
+
     def update_system_message(self, system_message: Union[str, List]):
         """Update the system message.
 
@@ -866,7 +873,7 @@ class ConversableAgent(Agent):
         # TODO: #1143 handle token limit exceeded error
         response = client.create(
             context=messages[-1].pop("context", None),
-            messages=self._oai_system_message + all_messages,
+            messages=self.oai_system_message + all_messages,
             cache=self.client_cache,
             callback_config=dict(callback=self.callbacks,
                                  params={'agent': self, 'sender': sender})
@@ -893,12 +900,6 @@ class ConversableAgent(Agent):
         config: Optional[Any] = None,
     ) -> Tuple[bool, Union[str, Dict, None]]:
         """Generate a reply using autogen.oai asynchronously."""
-        # return await asyncio.get_event_loop().run_in_executor(
-        #     None, functools.partial(self.generate_oai_reply,
-        #                             messages=messages,
-        #                             sender=sender,
-        #                             config=config)
-        # )
         client = self.client if config is None else config
         if client is None:
             return False, None
@@ -922,7 +923,7 @@ class ConversableAgent(Agent):
         # TODO: #1143 handle token limit exceeded error
         response = await client.a_create(
             context=messages[-1].pop("context", None),
-            messages=self._oai_system_message + all_messages,
+            messages=self.oai_system_message + all_messages,
             cache=self.client_cache,
             callback_config=dict(callback=self.callbacks,
                                  params={'agent': self, 'sender': sender})
