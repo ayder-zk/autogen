@@ -289,6 +289,10 @@ class ConversableAgent(Agent):
     def _update_oai_system_message(self) -> list[dict[str, str]]:
         return self._oai_system_message
 
+    @system_message.setter
+    def system_message(self, value: Union[str, List]):
+        self.update_system_message(system_message=value)
+
     def update_system_message(self, system_message: Union[str, List]):
         """Update the system message.
 
