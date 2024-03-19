@@ -5,6 +5,7 @@ from typing import Any, List, Optional, Dict, Callable, Tuple, Union
 import logging
 import inspect
 from flaml.automl.logger import logger_formatter
+from openai import AsyncOpenAI
 
 from pydantic import BaseModel
 
@@ -23,7 +24,7 @@ except ImportError:
 else:
     # raises exception if openai>=1 is installed and something is wrong with imports
     from openai import OpenAI, AzureOpenAI, APIError, __version__ as OPENAIVERSION
-    from openai.resources import Completions
+    from openai.resources import Completions, AsyncCompletions
     from openai.types.chat import ChatCompletion
     from openai.types.chat.chat_completion import ChatCompletionMessage, Choice
     from openai.types.chat.chat_completion_chunk import (
@@ -108,13 +109,21 @@ class OpenAIWrapper:
             config_list = [config.copy() for config in config_list]  # make a copy before modifying
             self._clients: List[OpenAI] = [
                 self._client(config, openai_config) for config in config_list
+            ]
+            self._async_clients: List[AsyncOpenAI] = [
+                self._async_client(config, openai_config)
+                for config in config_list
             ]  # could modify the config
+
             self._config_list = [
                 {**extra_kwargs, **{k: v for k, v in config.items() if k not in self.openai_kwargs}}
                 for config in config_list
             ]
         else:
             self._clients = [self._client(extra_kwargs, openai_config)]
+            self._async_clients = [
+                self._async_client(extra_kwargs, openai_config)
+            ]
             self._config_list = [extra_kwargs]
 
     def _separate_openai_config(self, config: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -148,6 +157,21 @@ class OpenAIWrapper:
             client = AzureOpenAI(**openai_config)
         else:
             client = OpenAI(**openai_config)
+        return client
+
+    def _async_client(
+            self,
+            config: Dict[str, Any],
+            openai_config: Dict[str, Any]
+    ) -> AsyncOpenAI:
+        """(async) Create an asynchronus client with the given config to
+        override openai_config, after removing extra kwargs.
+        """
+        openai_config = {
+            **openai_config,
+            **{k: v for k, v in config.items() if k in self.openai_kwargs}
+        }
+        client = AsyncOpenAI(**openai_config)
         return client
 
     @classmethod
@@ -348,7 +372,7 @@ class OpenAIWrapper:
 
         callback_config = config.pop('callback_config', {})
 
-        for i, client in enumerate(self._clients):
+        for i, client in enumerate(self._async_clients):
             # merge the input config with the i-th config in the config list
             full_config = {**config, **self._config_list[i]}
             # separate the config into create_config and extra_kwargs
@@ -706,7 +730,7 @@ class OpenAIWrapper:
 
         return response
 
-    async def _a_completions_create(self, client: OpenAI, params: Dict[str, Any], **kwargs) -> ChatCompletion:
+    async def _a_completions_create(self, client: AsyncOpenAI, params: Dict[str, Any], **kwargs) -> ChatCompletion:
         """Create a completion for a given config using openai's client.
 
         Args:
@@ -716,7 +740,7 @@ class OpenAIWrapper:
         Returns:
             The completion.
         """
-        completions: Completions = client.chat.completions \
+        completions: AsyncCompletions = client.chat.completions \
             if "messages" in params else client.completions
         # If streaming is enabled and has messages, then iterate over
         # the chunks of the response.
@@ -744,8 +768,9 @@ class OpenAIWrapper:
             last_chunk = None
             token_usage = None
             try:
-                # Send the chat completion request to OpenAI's API and process the response in chunks
-                for chunk in completions.create(**params):
+                # Send the chat completion request to OpenAI's API and process
+                # the response in chunks
+                for chunk in await completions.create(**params):
                     if chunk.choices:
                         last_chunk = chunk
                         for choice in chunk.choices:
@@ -869,7 +894,7 @@ class OpenAIWrapper:
             # completion request
             params = params.copy()
             params["stream"] = False
-            response = completions.create(**params)
+            response = await completions.create(**params)
 
         return response
 

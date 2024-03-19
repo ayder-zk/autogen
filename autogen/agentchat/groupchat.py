@@ -380,7 +380,10 @@ class GroupChatManager(ConversableAgent):
                 # select the next speaker
                 speaker = groupchat.select_speaker(speaker, self)
                 # let the speaker speak
-                reply = speaker.generate_reply(sender=self)
+                if speaker:
+                    reply = speaker.generate_reply(sender=self)
+                else:
+                    reply = None
             except KeyboardInterrupt:
                 # let the admin agent speak if interrupted
                 if groupchat.admin_name in groupchat.agent_names:
@@ -445,7 +448,10 @@ class GroupChatManager(ConversableAgent):
                 # select the next speaker
                 speaker = await groupchat.a_select_speaker(speaker, self)
                 # let the speaker speak
-                reply = await speaker.a_generate_reply(sender=self)
+                if speaker:
+                    reply = await speaker.a_generate_reply(sender=self)
+                else:
+                    reply = None
             except KeyboardInterrupt:
                 # let the admin agent speak if interrupted
                 if groupchat.admin_name in groupchat.agent_names:
@@ -475,7 +481,20 @@ class GroupChatManager(ConversableAgent):
         super()._raise_exception_on_async_reply_functions()
 
         for agent in self._groupchat.agents:
-            agent._raise_exception_on_async_reply_functions()
+            if isinstance(agent, ConversableAgent):
+                agent._raise_exception_on_async_reply_functions()
+
+    def _raise_exception_on_sync_reply_functions(self) -> None:
+        """Raise an exception if any sync reply functions are registered.
+
+        Raises:
+            RuntimeError: if any async reply functions are registered.
+        """
+        super()._raise_exception_on_sync_reply_functions()
+
+        for agent in self._groupchat.agents:
+            if isinstance(agent, ConversableAgent):
+                agent._raise_exception_on_sync_reply_functions()
 
     def clear_agents_history(self, reply: str, groupchat: GroupChat) -> str:
         """Clears history of messages for all agents or selected one. Can preserve selected number of last messages.

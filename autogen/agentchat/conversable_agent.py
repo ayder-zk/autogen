@@ -172,24 +172,44 @@ class ConversableAgent(Agent):
         self._default_auto_reply = default_auto_reply
         self._reply_func_list = []
         self._ignore_async_func_in_sync_chat_list = []
+        self._ignore_sync_func_in_async_chat_list = []
         self.reply_at_receive = defaultdict(bool)
-        self.register_reply([Agent, None], ConversableAgent.generate_oai_reply)
-        self.register_reply([Agent, None], ConversableAgent.a_generate_oai_reply, ignore_async_in_sync_chat=True)
-        self.register_reply([Agent, None], ConversableAgent.generate_code_execution_reply)
-        self.register_reply([Agent, None], ConversableAgent.generate_tool_calls_reply)
-        self.register_reply([Agent, None], ConversableAgent.a_generate_tool_calls_reply, ignore_async_in_sync_chat=True)
-        self.register_reply([Agent, None], ConversableAgent.generate_function_call_reply)
-        self.register_reply(
-            [Agent, None], ConversableAgent.a_generate_function_call_reply, ignore_async_in_sync_chat=True
+        self.register_reply([Agent, None],
+                            ConversableAgent.generate_oai_reply,
+                            ignore_sync_in_async_chat=True)
+        self.register_reply([Agent, None],
+                            ConversableAgent.a_generate_oai_reply,
+                            ignore_async_in_sync_chat=True)
+        self.register_reply([Agent, None],
+                            ConversableAgent.generate_code_execution_reply)
+        self.register_reply([Agent, None],
+                            ConversableAgent.generate_tool_calls_reply,
+                            ignore_sync_in_async_chat=True)
+        self.register_reply([Agent, None],
+                            ConversableAgent.a_generate_tool_calls_reply,
+                            ignore_async_in_sync_chat=True)
+        self.register_reply([Agent, None],
+                            ConversableAgent.generate_function_call_reply,
+                            ignore_sync_in_async_chat=True)
+        self.register_reply([Agent, None],
+                            ConversableAgent.a_generate_function_call_reply,
+                            ignore_async_in_sync_chat=True
         )
-        self.register_reply([Agent, None], ConversableAgent.check_termination_and_human_reply)
+        self.register_reply([Agent, None],
+                            ConversableAgent.check_termination_and_human_reply,
+                            ignore_sync_in_async_chat=True)
         self.register_reply(
-            [Agent, None], ConversableAgent.a_check_termination_and_human_reply, ignore_async_in_sync_chat=True
+            [Agent, None],
+            ConversableAgent.a_check_termination_and_human_reply,
+            ignore_async_in_sync_chat=True
         )
 
-        # Registered hooks are kept in lists, indexed by hookable method, to be called in their order of registration.
-        # New hookable methods should be added to this list as required to support new agent capabilities.
-        self.hook_lists = {self.process_last_message: []}  # This is currently the only hookable method.
+        # Registered hooks are kept in lists, indexed by hookable method,
+        # to be called in their order of registration.
+        # New hookable methods should be added to this list as required
+        # to support new agent capabilities.
+        self.hook_lists = {self.process_last_message: []}  # This is currently
+        # the only hookable method.
 
     def register_reply(
         self,
@@ -200,6 +220,7 @@ class ConversableAgent(Agent):
         reset_config: Optional[Callable] = None,
         *,
         ignore_async_in_sync_chat: bool = False,
+        ignore_sync_in_async_chat: bool = False,
     ):
         """Register a reply function.
 
@@ -231,6 +252,10 @@ class ConversableAgent(Agent):
             ignore_async_in_sync_chat: whether to ignore the async reply function in sync chats. If `False`, an exception
                 will be raised if an async reply function is registered and a chat is initialized with a sync
                 function.
+            ignore_sync_in_async_chat: whether to ignore the sync reply
+                function in async chats. If `False`, an exception
+                will be raised if an sync reply function is registered
+                and a chat is initialized with an async function.
         ```python
         def reply_func(
             recipient: ConversableAgent,
@@ -261,6 +286,9 @@ class ConversableAgent(Agent):
         )
         if ignore_async_in_sync_chat and inspect.iscoroutinefunction(reply_func):
             self._ignore_async_func_in_sync_chat_list.append(reply_func)
+        if ignore_sync_in_async_chat \
+                and not inspect.iscoroutinefunction(reply_func):
+            self._ignore_sync_func_in_async_chat_list.append(reply_func)
 
     @property
     def callbacks(self) -> Union[AgentCallbackListHandler | None]:
@@ -729,6 +757,30 @@ class ConversableAgent(Agent):
 
             raise RuntimeError(msg)
 
+    def _raise_exception_on_sync_reply_functions(self) -> None:
+        """Raise an exception if any sync reply functions are registered.
+
+        Raises:
+            RuntimeError: if any sync reply functions are registered.
+        """
+        reply_functions = {
+            f["reply_func"] for f in self._reply_func_list}.difference(
+            self._ignore_sync_func_in_async_chat_list
+        )
+
+        sync_reply_functions = [
+            f for f in reply_functions if not inspect.iscoroutinefunction(f)
+        ]
+        if sync_reply_functions:
+            msg = (
+                "Sync reply functions can only be used with "
+                "ConversableAgent.initiate_chat(). "
+                "The following sync reply functions are found: "
+                + ", ".join([f.__name__ for f in sync_reply_functions])
+            )
+
+            raise RuntimeError(msg)
+
     def initiate_chat(
         self,
         recipient: "ConversableAgent",
@@ -790,6 +842,7 @@ class ConversableAgent(Agent):
         """
         self._prepare_chat(recipient, clear_history)
         for agent in [self, recipient]:
+            agent._raise_exception_on_sync_reply_functions()
             agent.previous_cache = agent.client_cache
             agent.client_cache = cache
         await self.a_send(await self.a_generate_init_message(**context), recipient, silent=silent)
