@@ -3,6 +3,7 @@ import logging
 import json
 import tiktoken
 import re
+from copy import deepcopy
 
 
 logger = logging.getLogger(__name__)
@@ -186,3 +187,17 @@ def num_tokens_from_functions(functions, model="gpt-3.5-turbo-0613") -> int:
 
     num_tokens += 12
     return num_tokens
+
+
+def trim_history(messages: list[dict], model: str,
+                 token_limit: int) -> list[dict]:
+    messages_copy = deepcopy(messages)
+    while count_token(messages_copy, model) >= token_limit:
+        # remove first non-system message
+        i = 0
+        for i, msg in enumerate(messages_copy):
+            if msg['role'] != 'system':
+                break
+        if messages_copy and messages_copy[i]['role'] != 'system':
+            messages_copy.pop(i)
+    return messages_copy

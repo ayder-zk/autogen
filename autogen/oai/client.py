@@ -12,7 +12,11 @@ from pydantic import BaseModel
 from autogen.cache.cache import Cache
 
 from autogen.oai.openai_utils import get_key, OAI_PRICE1K
-from autogen.token_count_utils import count_token
+from autogen.token_count_utils import (
+    count_token,
+    trim_history,
+    get_max_token_limit
+)
 
 TOOL_ENABLED = False
 try:
@@ -604,6 +608,10 @@ class OpenAIWrapper:
             token_usage = None
             try:
                 # Send the chat completion request to OpenAI's API and process the response in chunks
+                params['messages'] = trim_history(params['messages'],
+                                                  params['model'],
+                                                  get_max_token_limit(params[
+                                                                          'model']) // 3 * 2)
                 for chunk in completions.create(**params):
                     if chunk.choices:
                         last_chunk = chunk
@@ -726,6 +734,10 @@ class OpenAIWrapper:
             # completion request
             params = params.copy()
             params["stream"] = False
+            params['messages'] = trim_history(params['messages'],
+                                              params['model'],
+                                              get_max_token_limit(
+                                                  params['model']) // 3 * 2)
             response = completions.create(**params)
 
         return response
@@ -770,7 +782,10 @@ class OpenAIWrapper:
             try:
                 # Send the chat completion request to OpenAI's API and process
                 # the response in chunks
-                for chunk in await completions.create(**params):
+                params['messages'] = trim_history(params['messages'],
+                                                  params['model'],
+                                                  get_max_token_limit(params['model']) // 3 * 2)
+                async for chunk in await completions.create(**params):
                     if chunk.choices:
                         last_chunk = chunk
                         for choice in chunk.choices:
@@ -894,6 +909,9 @@ class OpenAIWrapper:
             # completion request
             params = params.copy()
             params["stream"] = False
+            params['messages'] = trim_history(
+                params['messages'], params['model'],
+                get_max_token_limit(params['model']) // 3 * 2)
             response = await completions.create(**params)
 
         return response

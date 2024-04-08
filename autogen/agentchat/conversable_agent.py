@@ -181,7 +181,8 @@ class ConversableAgent(Agent):
                             ConversableAgent.a_generate_oai_reply,
                             ignore_async_in_sync_chat=True)
         self.register_reply([Agent, None],
-                            ConversableAgent.generate_code_execution_reply)
+                            ConversableAgent.generate_code_execution_reply,
+                            ignore_sync_in_async_chat=True)
         self.register_reply([Agent, None],
                             ConversableAgent.generate_tool_calls_reply,
                             ignore_sync_in_async_chat=True)
@@ -304,6 +305,11 @@ class ConversableAgent(Agent):
             self._callbacks = AgentCallbackListHandler(callbacks=value)
         else:
             self._callbacks = None
+
+        self._update_callbacks(value)
+
+    def _update_callbacks(self, value):
+        pass
 
     @property
     def system_message(self) -> Union[str, List]:
