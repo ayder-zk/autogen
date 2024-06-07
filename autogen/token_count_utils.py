@@ -1,28 +1,42 @@
-from typing import List, Union, Dict
-import logging
 import json
-import tiktoken
+import logging
+import re
+from copy import deepcopy
+from typing import Dict, List, Union
 
+import tiktoken
 
 logger = logging.getLogger(__name__)
 
 
-def get_max_token_limit(model="gpt-3.5-turbo-0613"):
+def get_max_token_limit(model: str = "gpt-3.5-turbo-0613") -> int:
+    # Handle common azure model names/aliases
+    model = re.sub(r"^gpt\-?35", "gpt-3.5", model)
+    model = re.sub(r"^gpt4", "gpt-4", model)
+
     max_token_limit = {
-        "gpt-3.5-turbo": 4096,
+        "gpt-3.5-turbo": 16385,
+        "gpt-3.5-turbo-0125": 16385,
         "gpt-3.5-turbo-0301": 4096,
         "gpt-3.5-turbo-0613": 4096,
         "gpt-3.5-turbo-instruct": 4096,
-        "gpt-3.5-turbo-16k": 16384,
-        "gpt-35-turbo": 4096,
-        "gpt-35-turbo-16k": 16384,
-        "gpt-35-turbo-instruct": 4096,
+        "gpt-3.5-turbo-16k": 16385,
+        "gpt-3.5-turbo-16k-0613": 16385,
+        "gpt-3.5-turbo-1106": 16385,
         "gpt-4": 8192,
+        "gpt-4-turbo": 128000,
+        "gpt-4-turbo-2024-04-09": 128000,
         "gpt-4-32k": 32768,
         "gpt-4-32k-0314": 32768,  # deprecate in Sep
         "gpt-4-0314": 8192,  # deprecate in Sep
         "gpt-4-0613": 8192,
         "gpt-4-32k-0613": 32768,
+        "gpt-4-1106-preview": 128000,
+        "gpt-4-0125-preview": 128000,
+        "gpt-4-turbo-preview": 128000,
+        "gpt-4-vision-preview": 128000,
+        "gpt-4o": 128000,
+        "gpt-4o-2024-05-13": 128000,
     }
     return max_token_limit[model]
 
@@ -58,7 +72,7 @@ def count_token(input: Union[str, List, Dict], model: str = "gpt-3.5-turbo-0613"
     elif isinstance(input, list) or isinstance(input, dict):
         return _num_token_from_messages(input, model=model)
     else:
-        raise ValueError("input must be str, list or dict")
+        raise ValueError(f"input must be str, list or dict, but we got {type(input)}")
 
 
 def _num_token_from_text(text: str, model: str = "gpt-3.5-turbo-0613"):
@@ -102,6 +116,9 @@ def _num_token_from_messages(messages: Union[List, Dict], model="gpt-3.5-turbo-0
         return _num_token_from_messages(messages, model="gpt-3.5-turbo-0613")
     elif "gpt-4" in model:
         logger.info("gpt-4 may update over time. Returning num tokens assuming gpt-4-0613.")
+        return _num_token_from_messages(messages, model="gpt-4-0613")
+    elif "gemini" in model:
+        logger.info("Gemini is not supported in tiktoken. Returning num tokens assuming gpt-4-0613.")
         return _num_token_from_messages(messages, model="gpt-4-0613")
     else:
         raise NotImplementedError(
@@ -180,3 +197,17 @@ def num_tokens_from_functions(functions, model="gpt-3.5-turbo-0613") -> int:
 
     num_tokens += 12
     return num_tokens
+
+
+def trim_history(messages: list[dict], model: str,
+                 token_limit: int) -> list[dict]:
+    messages_copy = deepcopy(messages)
+    while count_token(messages_copy, model) >= token_limit:
+        # remove first non-system message
+        i = 0
+        for i, msg in enumerate(messages_copy):
+            if msg['role'] != 'system':
+                break
+        if messages_copy and messages_copy[i]['role'] != 'system':
+            messages_copy.pop(i)
+    return messages_copy

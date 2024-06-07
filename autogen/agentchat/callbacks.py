@@ -86,18 +86,19 @@ class AgentCallbackHandler:
     ) -> Any:
         """(async) Run on the agent generates a final reply."""
 
-    async def on_llm_start(
+    def on_llm_new_token(
             self,
             agent: Agent,
+            token: str,
             sender: Optional[Agent] = None,
             **kwargs: Any
     ) -> Any:
         """
-        (async) Run on LLM starts for the agent.
+        Run on new LLM token received for the agent.
         Only available when streaming is enabled.
         """
 
-    async def on_llm_new_token(
+    async def on_a_llm_new_token(
             self,
             agent: Agent,
             token: str,
@@ -109,7 +110,40 @@ class AgentCallbackHandler:
         Only available when streaming is enabled.
         """
 
-    async def on_llm_end(
+    def on_llm_start(
+            self,
+            agent: Agent,
+            sender: Optional[Agent] = None,
+            **kwargs: Any
+    ) -> Any:
+        """
+        Run on LLM starts for the agent.
+        Only available when streaming is enabled.
+        """
+
+    async def on_a_llm_start(
+            self,
+            agent: Agent,
+            sender: Optional[Agent] = None,
+            **kwargs: Any
+    ) -> Any:
+        """
+        (async) Run on LLM starts for the agent.
+        Only available when streaming is enabled.
+        """
+
+    def on_llm_end(
+            self,
+            agent: Agent,
+            sender: Optional[Agent] = None,
+            **kwargs: Any
+    ) -> Any:
+        """
+        Run on LLM ends for the agent.
+        Only available when streaming is enabled.
+        """
+
+    async def on_a_llm_end(
             self,
             agent: Agent,
             sender: Optional[Agent] = None,
@@ -120,13 +154,21 @@ class AgentCallbackHandler:
         Only available when streaming is enabled.
         """
 
-    async def on_llm_error(
+    def on_llm_error(
             self,
             agent: Agent,
             error: BaseException,
             **kwargs: Any,
     ) -> Any:
         """Run when LLM errors."""
+
+    async def on_a_llm_error(
+            self,
+            agent: Agent,
+            error: BaseException,
+            **kwargs: Any,
+    ) -> Any:
+        """(async) Run when LLM errors."""
 
 
 @dataclass
@@ -135,6 +177,15 @@ class AgentCallbackListHandler(AgentCallbackHandler):
     handlers."""
 
     callbacks: List[AgentCallbackHandler]
+
+    def append(self, callback):
+        self.callbacks.append(callback)
+
+    def remove(self, callback):
+        self.callbacks.append(callback)
+
+    def __contains__(self, item):
+        return item in self.callbacks
 
     def _call(self, method, *args, **kwargs):
         for cb in self.callbacks:
@@ -154,7 +205,12 @@ class AgentCallbackListHandler(AgentCallbackHandler):
         _call, method='on_generate_final_reply')
     on_a_generate_final_reply = partialmethod(
         _acall, method='on_a_generate_final_reply')
-    on_llm_start = partialmethod(_acall, method='on_llm_start')
-    on_llm_new_token = partialmethod(_acall, method='on_llm_new_token')
-    on_llm_end = partialmethod(_acall, method='on_llm_end')
-    on_llm_error = partialmethod(_acall, method='on_llm_error')
+
+    on_llm_start = partialmethod(_call, method='on_llm_start')
+    on_a_llm_start = partialmethod(_acall, method='on_a_llm_start')
+    on_llm_new_token = partialmethod(_call, method='on_llm_new_token')
+    on_a_llm_new_token = partialmethod(_acall, method='on_a_llm_new_token')
+    on_llm_end = partialmethod(_call, method='on_llm_end')
+    on_a_llm_end = partialmethod(_acall, method='on_a_llm_end')
+    on_llm_error = partialmethod(_call, method='on_llm_error')
+    on_a_llm_error = partialmethod(_acall, method='on_a_llm_error')
